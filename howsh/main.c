@@ -11,6 +11,44 @@ static const char *PROMPT = "> ";
 static const char *PROG_NAME = "howsh";
 static const int INIT_BUFFER_SIZE = 10;
 
+// Shell builtins
+bool builtin_cd(char **args);
+bool builtin_exit(char **args);
+
+typedef struct {
+    char *name;
+    bool (*function)(char **);
+} builtin_t;
+
+builtin_t builtins[] = {
+    {"cd", &builtin_cd},
+    {"exit", &builtin_exit}
+};
+
+static const int NUM_BUILTINS = sizeof(builtins) / sizeof(builtin_t);
+
+bool builtin_cd(char **args)
+{
+    if (args[1] == NULL) {
+        args[1] = getenv("HOME");
+        if (args[1] == NULL) {
+            fprintf(stderr, "cd: expected directory name");
+            return false;
+        }
+    }
+
+    if (chdir(args[1]) != 0) {
+        perror("cd");
+    }
+
+    return false;
+}
+
+bool builtin_exit(char **args)
+{
+    return true;
+}
+
 /**
  * Represents a list of commands joined in a pipeline, with
  * optional redirection of standard input to the first command
@@ -100,7 +138,18 @@ char *parse_redirect(char ***currentp, char direct);
  */
 bool is_ordinary(char *word);
 
+/**
+ * @brief Create child processes and connect pipes to execute the given pipeline.
+ * 
+ * @param pipeline The `pipeline_t` struct to be executed.
+ * 
+ * @return true if the shell should be exited after executing this pipeline.
+ */
 bool execute_pipeline(pipeline_t pipeline);
+
+bool is_builtin(char **command);
+
+bool execute_builtin(char **command);
 
 /**
  * @brief Free up the memory allocated for the commands of this pipeline.
@@ -108,6 +157,13 @@ bool execute_pipeline(pipeline_t pipeline);
  * @param pipeline The `pipeline_t` struct to be freed.
  */
 void free_pipeline(pipeline_t pipeline);
+
+/**
+ * @brief Utility function to print an error message.
+ * 
+ * @param where Name of the function where the error has occured.
+ */
+void print_error(char *where);
 
 int main(int argc, char **argv)
 {
@@ -157,7 +213,7 @@ char *read_line(FILE *input)
             // EOF detected
             return NULL;
         } else {
-            fprintf(stderr, "%s (read_line): %s", PROG_NAME, strerror(errno));
+            print_error("read_line");
             exit(EXIT_FAILURE);
         }
     }
@@ -170,7 +226,7 @@ char **split_words(char *line)
     int buffer_size = INIT_BUFFER_SIZE;
     char **buffer = malloc(buffer_size * sizeof(*buffer));
     if (!buffer) {
-        fprintf(stderr, "%s (split_words): allocation error\n", PROG_NAME);
+        print_error("split_words");
         exit(EXIT_FAILURE);
     }
 
@@ -189,7 +245,7 @@ char **split_words(char *line)
             buffer_size *= 2;
             buffer = realloc(buffer, buffer_size * sizeof(*buffer));
             if (!buffer) {
-                fprintf(stderr, "%s (split_words): allocation error\n", PROG_NAME);
+                print_error("split_words");
                 exit(EXIT_FAILURE);
             }
         }
@@ -221,7 +277,7 @@ pipeline_t parse_pipeline(char **words)
     int buffer_size = INIT_BUFFER_SIZE;
     pipeline.commands = malloc(buffer_size * sizeof(*pipeline.commands));
     if (!pipeline.commands) {
-        fprintf(stderr, "%s (parse_pipeline): allocation error\n", PROG_NAME);
+        print_error("parse_pipeline");
         exit(EXIT_FAILURE);
     }
 
@@ -245,7 +301,7 @@ pipeline_t parse_pipeline(char **words)
             buffer_size *= 2;
             pipeline.commands = realloc(pipeline.commands, buffer_size * sizeof(*pipeline.commands));
             if (!pipeline.commands) {
-                fprintf(stderr, "%s (parse_pipeline): allocation error\n", PROG_NAME);
+                print_error("parse_pipeline");
                 exit(EXIT_FAILURE);
             }
         }
@@ -306,14 +362,16 @@ bool is_ordinary(char *word)
 
 bool execute_pipeline(pipeline_t pipeline)
 {
-    // TODO handle builtins -- don't fork if just a single builtin
+    if (is_builtin(pipeline.commands[0]) && !pipeline.commands[1]) {
+        return execute_builtin(pipeline.commands[0]);
+    }
 
     int in = STDIN_FILENO;
     if (pipeline.redirect_input) {
         in = open(pipeline.redirect_input, O_RDONLY);
 
         if (in == -1) {
-            fprintf(stderr, "%s (execute_pipeline): %s", PROG_NAME, strerror(errno));
+            print_error("execute_pipeline");
             return false;
         }
     }
@@ -323,7 +381,7 @@ bool execute_pipeline(pipeline_t pipeline)
         out = open(pipeline.redirect_output, O_CREAT | O_TRUNC | O_WRONLY);
 
         if (out == -1) {
-            fprintf(stderr, "%s (execute_pipeline): %s", PROG_NAME, strerror(errno));
+            print_error("execute_pipeline");
             return false;
         }
     }
@@ -337,7 +395,7 @@ bool execute_pipeline(pipeline_t pipeline)
             // Not the last command in the pipeline yet
             int pipe_fd[2];
             if (pipe(pipe_fd) == -1) {
-                fprintf(stderr, "%s (execute_pipeline): %s", PROG_NAME, strerror(errno));
+                print_error("execute_pipeline");
                 return false;
             }
 
@@ -349,22 +407,29 @@ bool execute_pipeline(pipeline_t pipeline)
         if (pid == 0) {
             // Successful child
 
-            if (dup2(in, STDIN_FILENO) == -1) {
-                fprintf(stderr, "%s (execute_pipeline): %s", PROG_NAME, strerror(errno));
-                exit(EXIT_FAILURE);
+            if (in != STDIN_FILENO) {
+                if (dup2(in, STDIN_FILENO) == -1) {
+                    print_error("execute_pipeline");
+                    exit(EXIT_FAILURE);
+                }
+                close(in);
             }
-            if (dup2(current_out, STDOUT_FILENO) == -1) {
-                fprintf(stderr, "%s (execute_pipeline): %s", PROG_NAME, strerror(errno));
-                exit(EXIT_FAILURE);
+
+            if (current_out != STDOUT_FILENO) {
+                if (dup2(current_out, STDOUT_FILENO) == -1) {
+                    print_error("execute_pipeline");
+                    exit(EXIT_FAILURE);
+                }
+                close(current_out);
             }
 
             if (execvp(**p, *p) == -1) {
-                fprintf(stderr, "%s (execute_pipeline): %s", PROG_NAME, strerror(errno));
+                print_error("execute_pipeline");
                 exit(EXIT_FAILURE);
             }
         } else if (pid < 0) {
             // Error in fork
-            fprintf(stderr, "%s (execute_pipeline): %s", PROG_NAME, strerror(errno));
+            print_error("execute_pipeline");
             return false;
         }
 
@@ -396,6 +461,30 @@ bool execute_pipeline(pipeline_t pipeline)
     }
 
     return false; // TODO return true on exit builtin?
+}
+
+bool is_builtin(char **command) {
+    for (int i = 0; i < NUM_BUILTINS; i++) {
+        if (strcmp(command[0], builtins[i].name) == 0) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool execute_builtin(char **command) {
+    for (int i = 0; i < NUM_BUILTINS; i++) {
+        if (strcmp(command[0], builtins[i].name) == 0) {
+            return builtins[i].function(command);
+        }
+    }
+
+    return false;
+}
+
+void print_error(char *where) {
+    fprintf(stderr, "%s (%s): %s", PROG_NAME, where, strerror(errno));
 }
 
 void free_pipeline(pipeline_t pipeline)
