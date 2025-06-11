@@ -64,7 +64,7 @@ typedef struct {
 } pipeline_t;
 
 /**
- * Print a prompt to the user on standard output.
+ * @brief Print a prompt to the user on standard output.
  */
 void print_prompt();
 
@@ -183,7 +183,14 @@ int main(int argc, char **argv)
 {
     // Initialize and process arguments
     FILE *input = stdin;
-    // TODO
+    
+    if (argc == 2) {
+        input = fopen(argv[1], "r");
+        if (input == NULL) {
+            print_error("main");
+            return EXIT_FAILURE;
+        }
+    }
 
     // Main loop
     bool done = false;
@@ -197,6 +204,7 @@ int main(int argc, char **argv)
         }
 
         char **words = split_words(line);
+        if (*words == NULL) continue;
 
         pipeline_t pipeline = parse_pipeline(words);
         done = execute_pipeline(pipeline);
@@ -208,6 +216,9 @@ int main(int argc, char **argv)
     }
 
     // Cleanup
+    if (input != stdin) {
+        fclose(input);
+    }
 
     return EXIT_SUCCESS;
 }
@@ -336,7 +347,8 @@ char **parse_command(char ***currentp)
     while (**currentp && is_ordinary(**currentp)) (*currentp)++;
 
     if (start == *currentp) {
-        // TODO syntax error -- empty command
+        fprintf(stderr, "Empty command\n");
+        return NULL;
     }
 
     return start;
@@ -356,7 +368,7 @@ char *parse_redirect(char ***currentp, char direct)
                 result = **currentp;
                 (*currentp)++;
             } else {
-                // TODO syntax error -- missing file name
+                fprintf(stderr, "Missing file name after redirection\n");
             }
         } else {
             // no space before file name
@@ -376,6 +388,10 @@ bool is_ordinary(char *word)
 
 bool execute_pipeline(pipeline_t pipeline)
 {
+    if (pipeline.commands[0] == NULL) {
+        return false;
+    }
+
     if (is_builtin(pipeline.commands[0]) && !pipeline.commands[1]) {
         return execute_builtin(pipeline.commands[0]);
     }
@@ -474,7 +490,7 @@ bool execute_pipeline(pipeline_t pipeline)
         } while (!WIFEXITED(status) && !WIFSIGNALED(status));
     }
 
-    return false; // TODO return true on exit builtin?
+    return false;
 }
 
 bool is_builtin(char **command) {
@@ -498,7 +514,7 @@ bool execute_builtin(char **command) {
 }
 
 void print_error(char *where) {
-    fprintf(stderr, "%s (%s): %s", PROG_NAME, where, strerror(errno));
+    fprintf(stderr, "%s (%s): %s\n", PROG_NAME, where, strerror(errno));
 }
 
 void free_pipeline(pipeline_t pipeline)
