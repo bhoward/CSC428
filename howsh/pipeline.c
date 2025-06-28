@@ -5,6 +5,21 @@
 #include "pipeline.h"
 #include "util.h"
 
+/**
+ * @brief Start the given command with provided I/O.
+ * 
+ * @param command A NULL terminated array of strings.
+ * `command[0]` is the name of the command, and the rest
+ * of the array is its arguments.
+ * 
+ * @param in The file descriptor to be used for the command's
+ * standard input.
+ * 
+ * @param out The file descriptor to be used for the command's
+ * standard output.
+ */
+static void start_child(char **command, int in, int out);
+
 void init_pipeline(pipeline_t *pipeline)
 {
     pipeline->redirect_input = NULL;
@@ -18,6 +33,7 @@ bool execute_pipeline(pipeline_t *pipeline)
         return false;
     }
 
+    // A builtin must be the only command in the pipeline
     if (is_builtin(pipeline->commands[0]) && !pipeline->commands[1]) {
         return execute_builtin(pipeline->commands[0]);
     }
@@ -45,7 +61,7 @@ bool execute_pipeline(pipeline_t *pipeline)
     pid_t pid = 0;
     for (char ***p = pipeline->commands; *p; p++) {
         int current_out = out;
-        int next_in = 0;
+        int next_in = STDIN_FILENO;
 
         if (*(p + 1)) {
             // Not the last command in the pipeline yet
@@ -62,27 +78,7 @@ bool execute_pipeline(pipeline_t *pipeline)
         pid = fork();
         if (pid == 0) {
             // Successful child
-
-            if (in != STDIN_FILENO) {
-                if (dup2(in, STDIN_FILENO) == -1) {
-                    print_error("execute_pipeline");
-                    exit(EXIT_FAILURE);
-                }
-                close(in);
-            }
-
-            if (current_out != STDOUT_FILENO) {
-                if (dup2(current_out, STDOUT_FILENO) == -1) {
-                    print_error("execute_pipeline");
-                    exit(EXIT_FAILURE);
-                }
-                close(current_out);
-            }
-
-            if (execvp(**p, *p) == -1) {
-                print_error("execute_pipeline");
-                exit(EXIT_FAILURE);
-            }
+            start_child(*p, in, current_out);
         } else if (pid < 0) {
             // Error in fork
             print_error("execute_pipeline");
@@ -117,6 +113,30 @@ bool execute_pipeline(pipeline_t *pipeline)
     }
 
     return false;
+}
+
+static void start_child(char **command, int in, int out)
+{
+    if (in != STDIN_FILENO) {
+        if (dup2(in, STDIN_FILENO) == -1) {
+            print_error("start_child");
+            exit(EXIT_FAILURE);
+        }
+        close(in);
+    }
+
+    if (out != STDOUT_FILENO) {
+        if (dup2(out, STDOUT_FILENO) == -1) {
+            print_error("start_child");
+            exit(EXIT_FAILURE);
+        }
+        close(out);
+    }
+
+    if (execvp(*command, command) == -1) {
+        print_error("start_child");
+        exit(EXIT_FAILURE);
+    }
 }
 
 void free_pipeline(pipeline_t *pipeline)

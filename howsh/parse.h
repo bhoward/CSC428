@@ -30,39 +30,4 @@ char **split_words(char *line);
  */
 pipeline_t parse_pipeline(char **words);
 
-/**
- * @brief Parse a single command (one or more words, none of which start
- * with pipe or redirection symbols: |, <, >).
- * 
- * @param currentp Pointer (reference parameter) to the current position in
- * a null-terminated array of strings.
- * 
- * @return Pointer to the first word of the command, or NULL if not found.
- */
-char **parse_command(char ***currentp);
-
-/**
- * @brief Parse a redirection following a command, either `< filename` or
- * `> filename`.
- * 
- * @param currentp Pointer (reference parameter) to the current position in
- * a null-terminated array of strings.
- * 
- * @param direct The redirection character, either '<' (input) or '>' (output).
- * 
- * @return The file name to redirect to, or NULL. The previous command will be
- * terminated with a NULL pointer, replacing the start of the redirection.
- */
-char *parse_redirect(char ***currentp, char direct);
-
-/**
- * @brief Check whether a word is part of a command or if it indicates a
- * pipe or redirection.
- * 
- * @param word The word to check. Assumed to be nonempty.
- * 
- * @return true if the word does not start with '|', '<', or '>'
- */
-bool is_ordinary(char *word);
-
 #endif
