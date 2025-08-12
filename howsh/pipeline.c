@@ -1,9 +1,12 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/wait.h>
 
 #include "pipeline.h"
 #include "util.h"
+
 
 /**
  * @brief Start the given command with provided I/O.
@@ -50,7 +53,8 @@ bool execute_pipeline(pipeline_t *pipeline)
 
     int out = STDOUT_FILENO;
     if (pipeline->redirect_output) {
-        out = open(pipeline->redirect_output, O_CREAT | O_TRUNC | O_WRONLY);
+        mode_t mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH;
+        out = open(pipeline->redirect_output, O_CREAT | O_TRUNC | O_WRONLY, mode);
 
         if (out == -1) {
             print_error("execute_pipeline");
